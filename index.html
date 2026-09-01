@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scoped Access Ledger — Tim O'Donnell</title>
+<meta name="description" content="A case study on giving an AI coding agent auditable, revocable access to real infrastructure — and where the control actually broke.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔑</text></svg>">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@400;500;600;700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+  :root {
+    --paper: #F0F1EC;
+    --paper-raised: #FFFFFF;
+    --ink: #1B1F26;
+    --ink-dim: #5B6470;
+    --line: #D8DAD3;
+    --brass: #8C5E1E;
+    --brass-fill: #EADFC5;
+    --signal: #2F5D52;
+    --signal-fill: #DCE8E3;
+    --shadow: rgba(27, 31, 38, 0.08);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #14171C;
+      --paper-raised: #1B1F26;
+      --ink: #ECE8DE;
+      --ink-dim: #9BA2AC;
+      --line: #2B313B;
+      --brass: #D9A64B;
+      --brass-fill: #3A2E17;
+      --signal: #7FB8AA;
+      --signal-fill: #1D2E29;
+      --shadow: rgba(0, 0, 0, 0.3);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper: #14171C;
+    --paper-raised: #1B1F26;
+    --ink: #ECE8DE;
+    --ink-dim: #9BA2AC;
+    --line: #2B313B;
+    --brass: #D9A64B;
+    --brass-fill: #3A2E17;
+    --signal: #7FB8AA;
+    --signal-fill: #1D2E29;
+    --shadow: rgba(0, 0, 0, 0.3);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Public Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  img { max-width: 100%; }
+
+  .wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  /* ---------- Masthead ---------- */
+
+  .masthead {
+    padding: 56px 0 40px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .site-id {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 28px;
+  }
+
+  .site-id .name {
+    font-family: 'Zilla Slab', Georgia, 'Times New Roman', serif;
+    font-weight: 600;
+    font-size: 1.05rem;
+    letter-spacing: 0.01em;
+  }
+
+  .site-id .role {
+    font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+
+  .eyebrow {
+    font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--brass);
+    margin: 0 0 14px;
+  }
+
+  h1 {
+    font-family: 'Zilla Slab', Georgia, 'Times New Roman', serif;
+    font-weight: 700;
+    font-size: clamp(2rem, 4.2vw, 2.75rem);
+    line-height: 1.12;
+    letter-spacing: -0.01em;
+    margin: 0 0 20px;
+    text-wrap: balance;
+    max-width: 15ch;
+  }
+
+  .dek {
+    font-size: 1.12rem;
+    line-height: 1.6;
+    color: var(--ink-dim);
+    max-width: 56ch;
+    margin: 0;
+  }
+
+  /* ---------- Ledger stamp ---------- */
+
+  .stamp {
+    margin: 36px 0 0;
+    border: 1px solid var(--line);
+    background: var(--paper-raised);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+
+  .stamp dl {
+    margin: 0;
+    padding: 14px 18px;
+    border-left: 1px solid var(--line);
+  }
+
+  .stamp dl:first-child { border-left: none; }
+
+  .stamp dt {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.66rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin-bottom: 5px;
+  }
+
+  .stamp dd {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+
+  .status-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.85rem;
+    color: var(--signal);
+  }
+
+  .status-tag::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--signal);
+    flex: none;
+  }
+
+  /* ---------- Article body ---------- */
+
+  article { padding: 48px 0 8px; }
+
+  article > section + section { margin-top: 44px; }
+
+  h2 {
+    font-family: 'Zilla Slab', Georgia, serif;
+    font-weight: 600;
+    font-size: 1.45rem;
+    letter-spacing: -0.005em;
+    margin: 0 0 16px;
+    text-wrap: balance;
+  }
+
+  p { margin: 0 0 16px; max-width: 66ch; }
+  p:last-child { margin-bottom: 0; }
+
+  strong { font-weight: 600; color: var(--ink); }
+
+  /* ---------- Scope diagram ---------- */
+
+  .scope {
+    margin: 28px 0;
+    border: 1px solid var(--line);
+    background: var(--paper-raised);
+    padding: 28px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .scope-band {
+    border: 1px solid var(--line);
+    padding: 14px 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .scope-band + .scope-band { margin-left: 20px; }
+  .scope-band:nth-child(2) { margin-left: 40px; }
+  .scope-band:nth-child(3) { margin-left: 60px; }
+  .scope-band:nth-child(4) { margin-left: 80px; background: var(--brass-fill); border-color: var(--brass); }
+
+  .scope-band .label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.78rem;
+    letter-spacing: 0.03em;
+  }
+
+  .scope-band .detail {
+    font-size: 0.82rem;
+    color: var(--ink-dim);
+  }
+
+  .scope-caption {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin-top: 6px;
+  }
+
+  /* ---------- Mechanism ledger ---------- */
+
+  .mechanisms {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .mechanisms li {
+    display: grid;
+    grid-template-columns: 2.6rem 1fr;
+    gap: 18px;
+    padding: 20px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .mechanisms .num {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.85rem;
+    color: var(--brass);
+    padding-top: 2px;
+  }
+
+  .mechanisms h3 {
+    font-family: 'Public Sans', sans-serif;
+    font-weight: 600;
+    font-size: 1rem;
+    margin: 0 0 6px;
+  }
+
+  .mechanisms p { margin: 0; font-size: 0.95rem; color: var(--ink-dim); max-width: 58ch; }
+
+  /* ---------- Build detail ---------- */
+
+  .build-list {
+    margin: 24px 0 0;
+    padding: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .build-list dt {
+    font-family: 'Public Sans', sans-serif;
+    font-weight: 600;
+    font-size: 0.95rem;
+    padding: 16px 0 4px;
+    border-bottom: none;
+  }
+
+  .build-list dd {
+    margin: 0 0 16px;
+    padding-bottom: 16px;
+    font-size: 0.95rem;
+    color: var(--ink-dim);
+    max-width: 62ch;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .build-list dd:last-of-type { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+
+  .codeblock {
+    margin: 24px 0;
+    border: 1px solid var(--line);
+    background: var(--paper-raised);
+  }
+
+  .codeblock-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.66rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .codeblock pre {
+    margin: 0;
+    padding: 18px;
+    overflow-x: auto;
+    font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+    font-size: 0.84rem;
+    line-height: 1.6;
+  }
+
+  .codeblock .cmt { color: var(--ink-dim); }
+  .codeblock .str { color: var(--signal); }
+
+  /* ---------- Incident log ---------- */
+
+  .incident {
+    border: 1px solid var(--line);
+    background: var(--paper-raised);
+    margin: 22px 0;
+  }
+
+  .incident-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--line);
+    background: var(--brass-fill);
+  }
+
+  .incident-head .tag {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--brass);
+    font-weight: 600;
+  }
+
+  .incident-head time {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--ink-dim);
+  }
+
+  .incident-body { padding: 20px 20px 22px; }
+  .incident-body h3 {
+    font-family: 'Zilla Slab', Georgia, serif;
+    font-weight: 600;
+    font-size: 1.08rem;
+    margin: 0 0 10px;
+  }
+  .incident-body p { font-size: 0.96rem; }
+  .incident-body p:last-child { margin-bottom: 0; }
+
+  /* ---------- Pull line ---------- */
+
+  .pull {
+    font-family: 'Zilla Slab', Georgia, serif;
+    font-style: italic;
+    font-weight: 500;
+    font-size: 1.2rem;
+    line-height: 1.5;
+    color: var(--ink);
+    border-left: 2px solid var(--brass);
+    padding-left: 20px;
+    margin: 28px 0;
+    max-width: 52ch;
+  }
+
+  /* ---------- More from this project ---------- */
+
+  .more {
+    margin-top: 60px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+  }
+
+  .more .eyebrow { margin-top: 40px; }
+
+  .more-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    padding: 18px 0;
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap;
+  }
+
+  .more-row .title {
+    font-family: 'Zilla Slab', Georgia, serif;
+    font-weight: 600;
+    font-size: 1.05rem;
+  }
+
+  .more-row .note {
+    font-size: 0.88rem;
+    color: var(--ink-dim);
+    max-width: 44ch;
+  }
+
+  .queued {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    border: 1px solid var(--line);
+    padding: 3px 8px;
+    white-space: nowrap;
+  }
+
+  /* ---------- Footer ---------- */
+
+  footer {
+    margin-top: 56px;
+    padding: 28px 0 60px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--ink-dim);
+  }
+
+  footer a {
+    color: var(--ink);
+    text-decoration: none;
+    border-bottom: 1px solid var(--brass);
+  }
+  footer a:hover { color: var(--brass); }
+
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--brass);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .masthead, article > section, .more-row { animation: rise 0.5s ease-out both; }
+    article > section:nth-of-type(1) { animation-delay: 0.03s; }
+    article > section:nth-of-type(2) { animation-delay: 0.06s; }
+    article > section:nth-of-type(3) { animation-delay: 0.09s; }
+    article > section:nth-of-type(4) { animation-delay: 0.12s; }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  }
+
+  @media (max-width: 560px) {
+    .scope-band, .scope-band:nth-child(2), .scope-band:nth-child(3), .scope-band:nth-child(4) {
+      margin-left: 0;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="site-id">
+      <span class="name">Tim O'Donnell</span>
+      <span class="role">Engineering &amp; Applied AI Leadership — Personal Projects</span>
+    </div>
+    <p class="eyebrow">Case Study · Infrastructure Governance</p>
+    <h1>Scoped, Revocable, Auditable</h1>
+    <p class="dek">Giving an AI coding agent real access to a production-style infrastructure fleet — and the two times my own controls broke, and what that actually taught me.</p>
+
+    <dl class="stamp">
+      <dl>
+        <dt>System</dt>
+        <dd>Homelab credential vault</dd>
+      </dl>
+      <dl>
+        <dt>Agent</dt>
+        <dd>Claude Code (AI coding agent)</dd>
+      </dl>
+      <dl>
+        <dt>Status</dt>
+        <dd><span class="status-tag">In production</span></dd>
+      </dl>
+      <dl>
+        <dt>Est.</dt>
+        <dd>Aug 2026</dd>
+      </dl>
+    </dl>
+  </header>
+
+  <article>
+
+    <section>
+      <h2>The problem</h2>
+      <p>I run a small self-hosted infrastructure fleet — a cloud server, a home-automation controller, a set of NixOS-based edge devices — and I use an AI coding agent as a hands-on collaborator for running it: reading logs, calling internal APIs, deploying config changes, working live on real boxes rather than guessing from documentation.</p>
+      <p>That's genuinely useful. It's also an access-control problem the moment it stops being hypothetical. An agent that can usefully act on your infrastructure is, by definition, one that can do damage — by accident, or if its own credentials ever leak. "Just hand it my key" is the fast path, and the wrong one. The real engineering question isn't whether an agent should touch production-shaped systems. It's what <em>safe</em> delegation actually requires.</p>
+    </section>
+
+    <section>
+      <h2>The design</h2>
+      <p>Four principles, each backed by a concrete mechanism rather than a policy statement:</p>
+
+      <ol class="mechanisms">
+        <li>
+          <span class="num">01</span>
+          <div>
+            <h3>Least privilege, scoped at the source</h3>
+            <p>Credentials live in a vault isolated from my own — accessible only through a read-only, non-interactive identity. That identity can read what's been provisioned; it cannot create, edit, or delete a single item, even by accident. Every credential-bearing item still requires my own human login to originate.</p>
+          </div>
+        </li>
+        <li>
+          <span class="num">02</span>
+          <div>
+            <h3>Time-boxed by default, not by policy</h3>
+            <p>Access expires on a short, forced clock rather than relying on anyone remembering to revoke it. A forgotten credential decays on its own instead of sitting valid indefinitely.</p>
+          </div>
+        </li>
+        <li>
+          <span class="num">03</span>
+          <div>
+            <h3>Every action, a named event</h3>
+            <p>Each credentialed call requires a mandatory, human-readable reason string, logged. Nothing the agent does with real access happens silently.</p>
+          </div>
+        </li>
+        <li>
+          <span class="num">04</span>
+          <div>
+            <h3>A control plane the agent cannot reach</h3>
+            <p>Granting, renewing, and revoking access are commands I run myself, outside the agent's own execution context. It can check status. It cannot touch the switch.</p>
+          </div>
+        </li>
+      </ol>
+
+      <div class="scope">
+        <div class="scope-band"><span class="label">Human control plane</span><span class="detail">grant · renew · revoke</span></div>
+        <div class="scope-band"><span class="label">Scoped agent identity</span><span class="detail">read-only, expiring</span></div>
+        <div class="scope-band"><span class="label">Wrapper scripts</span><span class="detail">one purpose each, masked output</span></div>
+        <div class="scope-band"><span class="label">Target systems</span><span class="detail">API calls, SSH, deploys</span></div>
+      </div>
+      <p class="scope-caption">Each layer can only reach the one directly below it</p>
+    </section>
+
+    <section>
+      <h2>How it's built</h2>
+      <p>The vault itself is Proton Pass — a dedicated vault, separate from my personal one, so a problem here can't touch anything else. The mechanics behind the four principles above:</p>
+
+      <dl class="build-list">
+        <dt>A scoped agent identity, not a login</dt>
+        <dd>Proton Pass's CLI has an <code>agent</code> subsystem, distinct from a normal user session: read-only, bound to one vault, with a forced one-month expiration and a mandatory reason string on every read, logged.</dd>
+
+        <dt>An isolated session, kept separate on purpose</dt>
+        <dd>The agent's login session lives in its own directory, never the one my own CLI session uses. This isn't theoretical caution — early in setup, a shared session briefly gave the agent read access to <em>every</em> vault I own, before the two were split apart. Keeping them separate is what actually prevents that.</dd>
+
+        <dt>A dedicated SSH agent, one key only</dt>
+        <dd>A second SSH agent process holds just the one key scoped for this purpose — independent of my own system SSH agent, and independently revocable without touching my own SSH access at all.</dd>
+
+        <dt>One wrapper script per capability</dt>
+        <dd>Never general-purpose credential access. Each script authenticates, injects the secret only into that single child process's environment — masked by default, so even an accidental echo prints a placeholder instead of the real value — and never assigns a secret to a shell variable, so it can't leak into shell history or process listings.</dd>
+      </dl>
+
+      <div class="codeblock">
+        <div class="codeblock-label">Representative shape of one wrapper script</div>
+        <pre><code>ha_api() {
+  local reason="$1"; shift
+  <span class="cmt"># every call carries its own audit reason</span>
+  PROTON_PASS_AGENT_REASON="$reason" \
+    pass-cli run --env-file &lt;(pass-cli item env home-assistant-token) -- \
+    curl -sf -H "Authorization: Bearer $HA_TOKEN" "$@"
+}
+
+<span class="cmt"># usage:</span>
+ha_api <span class="str">"checking thermostat state for a bug report"</span> -- /api/states</code></pre>
+      </div>
+
+      <p>The reason string matters more than it looks — it's the mechanism behind the fix to the incident below: not a promise to be more careful, but making the narrow, audited path (one named field at a time) the <em>only</em> path a wrapper script can take.</p>
+    </section>
+
+    <section>
+      <h2>Where it actually broke</h2>
+      <p>Two real incidents mattered more than the design on paper.</p>
+
+      <div class="incident">
+        <div class="incident-head">
+          <span class="tag">Incident</span>
+          <time>2026-08-18</time>
+        </div>
+        <div class="incident-body">
+          <h3>A lapsed credential doesn't just go stale — the record disappears</h3>
+          <p>I assumed an unrenewed token would simply need reactivating. It didn't: past its expiration window, the agent identity itself was removed outright, and the normal renew command failed with <em>"not found."</em> Recovery meant fully recreating the scoped identity from my own login, not renewing it.</p>
+          <p>The real lesson wasn't the mechanic — it was that a longer default expiration is a mitigation, not a fix. The actual fix is a recurring human reminder to renew, because any fixed window eventually lapses the same way if nothing prompts action before it does. I try to design controls that degrade safely, not ones that quietly assume a human will remember.</p>
+        </div>
+      </div>
+
+      <div class="incident">
+        <div class="incident-head">
+          <span class="tag">Incident</span>
+          <time>2026-08-27</time>
+        </div>
+        <div class="incident-body">
+          <h3>A boundary I designed got bypassed by an honest debugging shortcut</h3>
+          <p>Mid-troubleshoot on a broken integration, the rule "never dump a full credential item — request one named field" got violated. A hand-rolled redaction script tried to denylist known secret-bearing field names, missed one type it hadn't anticipated, and that value reached the agent's own output unredacted.</p>
+          <p>Denylisting is exactly the failure mode the original rule existed to prevent, and it failed the same way anyway, under time pressure, written by me. The fix wasn't "be more careful" — it was retiring the entire shortcut: request fields one at a time by name, and if a full inspection is ever unavoidable, redact by an <em>allowlist</em> of known-safe fields, never by enumerating every possible secret field across item types.</p>
+        </div>
+      </div>
+
+      <p class="pull">I'd rather show a system where I found and fixed a real gap than one that's never been tested.</p>
+    </section>
+
+    <section>
+      <h2>Why this generalizes</h2>
+      <p>None of this is specific to a home server. It's the same shape as any real "give an autonomous system delegated access to production" problem: scope tightly, expire by default, audit everything, keep a human-only kill switch outside the agent's reach — and go back and look for where your own controls got quietly worked around under real pressure, because that's where the next incident actually comes from.</p>
+    </section>
+
+  </article>
+
+  <div class="more">
+    <p class="eyebrow">More from this project</p>
+
+    <div class="more-row">
+      <div>
+        <div class="title">A NixOS kiosk fleet, four devices, one design log</div>
+        <div class="note">Infra-as-code for a small edge-device fleet — a photo frame, a garage-entry panel, a home-automation wall tablet — built and documented as a running record of every decision and bug, not just the final config.</div>
+      </div>
+      <span class="queued">Queued</span>
+    </div>
+
+    <div class="more-row">
+      <div>
+        <div class="title">5,700 self-hosted tools, one searchable database</div>
+        <div class="note">A catalog built from a full podcast archive, queryable in the browser — the reference I built so tool decisions stop starting from scratch.</div>
+      </div>
+      <span class="queued">Queued</span>
+    </div>
+  </div>
+
+  <footer>
+    <span>© 2026 Tim O'Donnell</span>
+    <a href="https://github.com/dabudtruck" target="_blank" rel="noopener">github.com/dabudtruck</a>
+  </footer>
+
+</div>
+</body>
+</html>
